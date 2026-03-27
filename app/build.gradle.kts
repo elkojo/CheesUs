@@ -11,8 +11,8 @@ android {
         applicationId = "com.cheesus.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
     }
 
     buildTypes {
@@ -32,6 +32,13 @@ android {
 
     buildFeatures {
         viewBinding = true
+    }
+
+    // Vosk model files must not be compressed in the APK.
+    // If they are compressed, Android's AssetManager cannot read large files
+    // via file descriptor, and the model fails to load.
+    androidResources {
+        noCompress += listOf("mdl", "fst", "int", "ie", "dubm", "mat", "conf")
     }
 }
 

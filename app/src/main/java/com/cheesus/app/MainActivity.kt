@@ -174,8 +174,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                 speechService?.startListening(this)
             },
             { e: Exception ->
-                Log.e(TAG, "Model load failed", e)
-                binding.statusText.text = getString(R.string.status_error)
+                Log.e(TAG, "Model load failed: ${e.message}", e)
+                binding.statusText.text = "Error: ${e.message}"
             }
         )
     }
