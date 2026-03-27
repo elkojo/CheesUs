@@ -28,21 +28,39 @@ jobs:
       - name: Build release APK
         run: ./gradlew assembleRelease
 
-      - name: Sign APK
-        uses: r0adkll/sign-android-release@v1
-        id: sign_apk
-        with:
-          releaseDirectory: app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
-          alias: ${{ secrets.KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-
-      - name: Rename signed APK
+      - name: Sign and align APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          VERSION: ${{ github.ref_name }}
         run: |
-          VERSION="${{ github.ref_name }}"
-          mv "${{ steps.sign_apk.outputs.signedReleaseFile }}" \
-             "app/build/outputs/apk/release/CheesUs-${VERSION}.apk"
+          # Decode keystore
+          echo "$KEYSTORE_BASE64" | base64 -d > keystore.jks
+
+          # Find the latest available build tools
+          BUILD_TOOLS=$(ls /usr/local/lib/android/sdk/build-tools/ | sort -V | tail -1)
+          APKSIGNER="/usr/local/lib/android/sdk/build-tools/${BUILD_TOOLS}/apksigner"
+          ZIPALIGN="/usr/local/lib/android/sdk/build-tools/${BUILD_TOOLS}/zipalign"
+
+          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          ALIGNED="app/build/outputs/apk/release/app-release-aligned.apk"
+          SIGNED="app/build/outputs/apk/release/CheesUs-${VERSION}.apk"
+
+          # Align then sign
+          "$ZIPALIGN" -v 4 "$UNSIGNED" "$ALIGNED"
+          "$APKSIGNER" sign \
+            --ks keystore.jks \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass "pass:$STORE_PASSWORD" \
+            --key-pass "pass:$KEY_PASSWORD" \
+            --out "$SIGNED" \
+            "$ALIGNED"
+
+          # Verify
+          "$APKSIGNER" verify "$SIGNED" && echo "APK signed successfully"
+          rm -f keystore.jks
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
