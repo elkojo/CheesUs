@@ -3,7 +3,7 @@ name: Build and Release APK
 on:
   push:
     tags:
-      - 'v*'          # Runs when you push a tag like v1.0.0, v1.1.0, etc.
+      - 'v*'
 
 permissions:
   contents: write
@@ -28,11 +28,21 @@ jobs:
       - name: Build release APK
         run: ./gradlew assembleRelease
 
-      - name: Rename APK with version
+      - name: Sign APK
+        uses: r0adkll/sign-android-release@v1
+        id: sign_apk
+        with:
+          releaseDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Rename signed APK
         run: |
           VERSION="${{ github.ref_name }}"
-          mv app/build/outputs/apk/release/app-release-unsigned.apk \
-             app/build/outputs/apk/release/CheesUs-${VERSION}.apk
+          mv "${{ steps.sign_apk.outputs.signedReleaseFile }}" \
+             "app/build/outputs/apk/release/CheesUs-${VERSION}.apk"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
