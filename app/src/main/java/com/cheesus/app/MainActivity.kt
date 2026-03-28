@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -71,6 +72,16 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.US
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {}
+                    override fun onDone(utteranceId: String?) {
+                        if (isModelLoaded) speechService?.startListening(this@MainActivity)
+                    }
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) {
+                        if (isModelLoaded) speechService?.startListening(this@MainActivity)
+                    }
+                })
             }
         }
 
@@ -145,6 +156,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    // Stop Vosk to release the microphone before TTS plays,
+                    // UtteranceProgressListener will restart it when done.
+                    speechService?.stop()
                     val ttsParams = Bundle().apply {
                         putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
                     }
