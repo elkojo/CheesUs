@@ -3,6 +3,7 @@ package com.cheesus.app
 import android.Manifest
 import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -144,7 +145,10 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    tts?.speak("HALLOUMI", TextToSpeech.QUEUE_FLUSH, null, "halloumi")
+                    val ttsParams = Bundle().apply {
+                        putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+                    }
+                    tts?.speak("HALLOUMI", TextToSpeech.QUEUE_FLUSH, ttsParams, "halloumi")
                     runOnUiThread {
                         binding.statusText.text = getString(R.string.status_cheese)
                         // Briefly flash the status, then go back to listening
