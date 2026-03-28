@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,6 +36,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
     private var speechService: SpeechService? = null
     private var isModelLoaded = false
+    private var isTakingPhoto = false
+    private var tts: TextToSpeech? = null
 
     // Required permissions
     private val requiredPermissions = mutableListOf(
@@ -64,6 +67,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         setContentView(binding.root)
 
         cameraExecutor = Executors.newSingleThreadExecutor()
+        tts = TextToSpeech(this) { /* no-op: speak only after init succeeds */ }
 
         if (allPermissionsGranted()) {
             startApp()
@@ -111,7 +115,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     private fun takePhoto() {
-        val capture = imageCapture ?: return
+        if (isTakingPhoto) return
+        isTakingPhoto = true
+        val capture = imageCapture ?: run { isTakingPhoto = false; return }
 
         // Build a filename with timestamp so photos don't overwrite each other
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())
@@ -134,10 +140,12 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    tts?.speak("HALLOUMI", TextToSpeech.QUEUE_FLUSH, null, "halloumi")
                     runOnUiThread {
                         binding.statusText.text = getString(R.string.status_cheese)
                         // Briefly flash the status, then go back to listening
                         binding.root.postDelayed({
+                            isTakingPhoto = false
                             if (isModelLoaded) {
                                 binding.statusText.text = getString(R.string.status_listening)
                             }
@@ -147,6 +155,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
                 override fun onError(e: ImageCaptureException) {
                     Log.e(TAG, "Photo capture failed: ${e.message}", e)
+                    isTakingPhoto = false
                 }
             }
         )
@@ -209,6 +218,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         speechService?.stop()
         speechService?.shutdown()
         cameraExecutor.shutdown()
+        tts?.shutdown()
     }
 
     companion object {
