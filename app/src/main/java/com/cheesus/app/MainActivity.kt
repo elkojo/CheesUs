@@ -67,7 +67,11 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         setContentView(binding.root)
 
         cameraExecutor = Executors.newSingleThreadExecutor()
-        tts = TextToSpeech(this) { /* no-op: speak only after init succeeds */ }
+        tts = TextToSpeech(this) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale.US
+            }
+        }
 
         if (allPermissionsGranted()) {
             startApp()
