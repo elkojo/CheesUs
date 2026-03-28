@@ -3,7 +3,9 @@ package com.cheesus.app
 import android.Manifest
 import android.content.ContentValues
 import android.content.pm.PackageManager
-import android.media.MediaActionSound
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -27,6 +29,9 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.PI
+import kotlin.math.exp
+import kotlin.math.sin
 
 class MainActivity : AppCompatActivity(), RecognitionListener {
 
@@ -38,7 +43,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private var isModelLoaded = false
     private var isTakingPhoto = false
 
-    private val shutterSound = MediaActionSound()
+    private var shutterTrack: AudioTrack? = null
 
     // Required permissions
     private val requiredPermissions = mutableListOf(
@@ -67,7 +72,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         setContentView(binding.root)
 
         cameraExecutor = Executors.newSingleThreadExecutor()
-        shutterSound.load(MediaActionSound.SHUTTER_CLICK)
+        buildShutterTrack()
 
         if (allPermissionsGranted()) {
             startApp()
@@ -75,6 +80,49 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             permissionLauncher.launch(requiredPermissions)
         }
     }
+
+    // ── Shutter click (AudioTrack, USAGE_ALARM) ────────────────────────────────
+    // Generates PCM audio directly — no files, no TTS, no system sounds.
+    // USAGE_ALARM uses the alarm volume channel, which is independent of
+    // media volume and plays even when the ringer is silenced.
+
+    private fun buildShutterTrack() {
+        val sampleRate = 44100
+        val numSamples = sampleRate * 120 / 1000   // 120 ms
+        val pcm = ShortArray(numSamples)
+        for (i in 0 until numSamples) {
+            val t = i.toDouble() / sampleRate
+            val envelope = exp(-t * 30)             // fast exponential decay
+            pcm[i] = (Short.MAX_VALUE * 0.8 * sin(2 * PI * 1000.0 * t) * envelope).toInt().toShort()
+        }
+        shutterTrack = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setBufferSizeInBytes(numSamples * 2)
+            .setTransferMode(AudioTrack.MODE_STATIC)
+            .build()
+        shutterTrack?.write(pcm, 0, numSamples)
+    }
+
+    private fun playShutterSound() {
+        val track = shutterTrack ?: return
+        if (track.playState == AudioTrack.PLAYSTATE_PLAYING) track.stop()
+        track.reloadStaticData()
+        track.play()
+    }
+
+    // ── Camera ────────────────────────────────────────────────────────────────
 
     private fun allPermissionsGranted() = requiredPermissions.all {
         ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
@@ -84,8 +132,6 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         startCamera()
         loadVoskModel()
     }
-
-    // ── Camera ────────────────────────────────────────────────────────────────
 
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
@@ -139,7 +185,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    shutterSound.play(MediaActionSound.SHUTTER_CLICK)
+                    playShutterSound()
                     runOnUiThread {
                         binding.statusText.text = getString(R.string.status_cheese)
                         binding.root.postDelayed({
@@ -207,7 +253,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         speechService?.stop()
         speechService?.shutdown()
         cameraExecutor.shutdown()
-        shutterSound.release()
+        shutterTrack?.stop()
+        shutterTrack?.release()
+        shutterTrack = null
     }
 
     companion object {
