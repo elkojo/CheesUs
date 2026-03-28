@@ -3,7 +3,8 @@ package com.cheesus.app
 import android.Manifest
 import android.content.ContentValues
 import android.content.pm.PackageManager
-import android.media.AudioManager
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -25,6 +26,7 @@ import org.vosk.Recognizer
 import org.vosk.android.RecognitionListener
 import org.vosk.android.SpeechService
 import org.vosk.android.StorageService
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.ExecutorService
@@ -39,7 +41,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private var speechService: SpeechService? = null
     private var isModelLoaded = false
     private var isTakingPhoto = false
+
     private var tts: TextToSpeech? = null
+    private var mediaPlayer: MediaPlayer? = null
 
     // Required permissions
     private val requiredPermissions = mutableListOf(
@@ -69,21 +73,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         setContentView(binding.root)
 
         cameraExecutor = Executors.newSingleThreadExecutor()
-        tts = TextToSpeech(this) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.US
-                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {}
-                    override fun onDone(utteranceId: String?) {
-                        if (isModelLoaded) speechService?.startListening(this@MainActivity)
-                    }
-                    @Deprecated("Deprecated in Java")
-                    override fun onError(utteranceId: String?) {
-                        if (isModelLoaded) speechService?.startListening(this@MainActivity)
-                    }
-                })
-            }
-        }
+        initTts()
 
         if (allPermissionsGranted()) {
             startApp()
@@ -91,6 +81,64 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             permissionLauncher.launch(requiredPermissions)
         }
     }
+
+    // ── TTS → pre-synthesize to file → MediaPlayer ────────────────────────────
+    // We synthesize "HALLOUMI" to a WAV file once at startup. At photo time we
+    // play that file via MediaPlayer, which runs independently of the Vosk
+    // AudioRecord session and is guaranteed to come out of the speaker.
+
+    private fun initTts() {
+        tts = TextToSpeech(this) { status ->
+            if (status != TextToSpeech.SUCCESS) {
+                Log.e(TAG, "TTS init failed with status $status")
+                return@TextToSpeech
+            }
+            val langResult = tts?.setLanguage(Locale.US) ?: TextToSpeech.LANG_NOT_SUPPORTED
+            if (langResult == TextToSpeech.LANG_MISSING_DATA || langResult == TextToSpeech.LANG_NOT_SUPPORTED) {
+                Log.e(TAG, "TTS language not supported: $langResult")
+                return@TextToSpeech
+            }
+            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+                override fun onDone(utteranceId: String?) {
+                    if (utteranceId == UTTERANCE_SYNTH) prepareMediaPlayer()
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) {
+                    Log.e(TAG, "TTS synthesis error for utterance $utteranceId")
+                }
+            })
+            val outFile = File(filesDir, "halloumi.wav")
+            tts?.synthesizeToFile("HALLOUMI", null, outFile, UTTERANCE_SYNTH)
+        }
+    }
+
+    private fun prepareMediaPlayer() {
+        val file = File(filesDir, "halloumi.wav")
+        if (!file.exists()) { Log.e(TAG, "Synthesized audio file missing"); return }
+        try {
+            mediaPlayer?.release()
+            mediaPlayer = MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                setDataSource(file.absolutePath)
+                prepare()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "MediaPlayer prepare failed: ${e.message}", e)
+        }
+    }
+
+    private fun playHalloumi() {
+        val mp = mediaPlayer ?: return
+        if (mp.isPlaying) mp.seekTo(0) else mp.start()
+    }
+
+    // ── Camera ────────────────────────────────────────────────────────────────
 
     private fun allPermissionsGranted() = requiredPermissions.all {
         ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
@@ -100,8 +148,6 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         startCamera()
         loadVoskModel()
     }
-
-    // ── Camera ────────────────────────────────────────────────────────────────
 
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
@@ -135,7 +181,6 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         isTakingPhoto = true
         val capture = imageCapture ?: run { isTakingPhoto = false; return }
 
-        // Build a filename with timestamp so photos don't overwrite each other
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())
         val contentValues = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, "CHEESUS_$timestamp")
@@ -156,16 +201,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    // Stop Vosk to release the microphone before TTS plays,
-                    // UtteranceProgressListener will restart it when done.
-                    speechService?.stop()
-                    val ttsParams = Bundle().apply {
-                        putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
-                    }
-                    tts?.speak("HALLOUMI", TextToSpeech.QUEUE_FLUSH, ttsParams, "halloumi")
+                    playHalloumi()
                     runOnUiThread {
                         binding.statusText.text = getString(R.string.status_cheese)
-                        // Briefly flash the status, then go back to listening
                         binding.root.postDelayed({
                             isTakingPhoto = false
                             if (isModelLoaded) {
@@ -184,20 +222,15 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     // ── Vosk Voice Recognition ─────────────────────────────────────────────────
-    // Vosk runs a small AI model entirely on-device — no internet needed.
-    // We only tell it to listen for "cheese" to keep it fast and private.
 
     private fun loadVoskModel() {
         binding.statusText.text = getString(R.string.status_loading)
 
-        // StorageService unpacks the model from assets into internal storage on first run,
-        // then loads it directly on subsequent launches.
         StorageService.unpack(
             this,
-            "model-en-us",   // folder name inside app/src/main/assets/
-            "model",         // destination folder name in internal storage
+            "model-en-us",
+            "model",
             { model: Model ->
-                // Called on main thread when the model is ready
                 isModelLoaded = true
                 binding.statusText.text = getString(R.string.status_listening)
                 val recognizer = Recognizer(model, 16000.0f, "[\"cheese\", \"[unk]\"]")
@@ -211,26 +244,22 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         )
     }
 
-    // ── RecognitionListener callbacks (called by Vosk) ────────────────────────
+    // ── RecognitionListener callbacks ─────────────────────────────────────────
 
     override fun onPartialResult(hypothesis: String?) {
-        // Called while you're still speaking — check for "cheese" early
         if (hypothesis?.contains("cheese", ignoreCase = true) == true) {
             runOnUiThread { takePhoto() }
         }
     }
 
     override fun onResult(hypothesis: String?) {
-        // Called when Vosk is confident about a complete phrase
         if (hypothesis?.contains("cheese", ignoreCase = true) == true) {
             runOnUiThread { takePhoto() }
         }
     }
 
     override fun onFinalResult(hypothesis: String?) {}
-    override fun onError(e: Exception?) {
-        Log.e(TAG, "Recognition error", e)
-    }
+    override fun onError(e: Exception?) { Log.e(TAG, "Recognition error", e) }
     override fun onTimeout() {}
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -241,9 +270,12 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         speechService?.shutdown()
         cameraExecutor.shutdown()
         tts?.shutdown()
+        mediaPlayer?.release()
+        mediaPlayer = null
     }
 
     companion object {
         private const val TAG = "CheesUs"
+        private const val UTTERANCE_SYNTH = "synth_halloumi"
     }
 }
