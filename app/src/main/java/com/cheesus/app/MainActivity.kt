@@ -2,6 +2,7 @@ package com.cheesus.app
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -42,10 +43,10 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private var speechService: SpeechService? = null
     private var isModelLoaded = false
     private var isTakingPhoto = false
+    private var isBackCamera = true
 
     private var shutterTrack: AudioTrack? = null
 
-    // Required permissions
     private val requiredPermissions = mutableListOf(
         Manifest.permission.CAMERA,
         Manifest.permission.RECORD_AUDIO
@@ -73,6 +74,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
         cameraExecutor = Executors.newSingleThreadExecutor()
         buildShutterTrack()
+
+        binding.btnToggleCamera.setOnClickListener { toggleCamera() }
+        binding.btnGallery.setOnClickListener { openGallery() }
 
         if (allPermissionsGranted()) {
             startApp()
@@ -122,7 +126,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         track.play()
     }
 
-    // ── Camera ────────────────────────────────────────────────────────────────
+    // ── Permissions ───────────────────────────────────────────────────────────
 
     private fun allPermissionsGranted() = requiredPermissions.all {
         ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
@@ -132,6 +136,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         startCamera()
         loadVoskModel()
     }
+
+    // ── Camera ────────────────────────────────────────────────────────────────
 
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
@@ -146,18 +152,33 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .build()
 
+            val selector = if (isBackCamera) {
+                CameraSelector.DEFAULT_BACK_CAMERA
+            } else {
+                CameraSelector.DEFAULT_FRONT_CAMERA
+            }
+
             try {
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    this,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
-                    preview,
-                    imageCapture
-                )
+                cameraProvider.bindToLifecycle(this, selector, preview, imageCapture)
             } catch (e: Exception) {
                 Log.e(TAG, "Camera binding failed", e)
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun toggleCamera() {
+        isBackCamera = !isBackCamera
+        startCamera()
+    }
+
+    private fun openGallery() {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
+        }
+        if (intent.resolveActivity(packageManager) != null) {
+            startActivity(intent)
+        }
     }
 
     private fun takePhoto() {

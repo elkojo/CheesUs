@@ -2,10 +2,9 @@
 <resources>
     <string name="app_name">CheesUs</string>
     <string name="status_loading">Loading voice model…</string>
-    <string name="status_listening">Say CHEESE to take a photo</string>
+    <string name="status_listening">Listening…</string>
     <string name="status_cheese">CHEESE!</string>
-    <string name="status_error">Microphone unavailable</string>
-    <string name="notification_title">CheesUs is listening</string>
-    <string name="notification_text">Say CHEESE to take a photo</string>
-    <string name="channel_name">CheesUs Listener</string>
+    <string name="hint_toggle_camera">1. Toggle camera</string>
+    <string name="hint_say_cheese">2. Say CHEESE to take a photo</string>
+    <string name="hint_gallery">3. See the photo gallery</string>
 </resources>
