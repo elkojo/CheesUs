@@ -175,10 +175,35 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
     private fun openGallery() {
         try {
-            startActivity(Intent(Intent.ACTION_VIEW, MediaStore.Images.Media.EXTERNAL_CONTENT_URI))
+            val bucketId = getCheesUsBucketId()
+            val uri = if (bucketId != null) {
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI.buildUpon()
+                    .appendQueryParameter("bucketId", bucketId)
+                    .build()
+            } else {
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            }
+            startActivity(Intent(Intent.ACTION_VIEW, uri))
         } catch (e: ActivityNotFoundException) {
             Toast.makeText(this, "No gallery app found", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun getCheesUsBucketId(): String? {
+        val projection = arrayOf(MediaStore.Images.Media.BUCKET_ID)
+        val selection = "${MediaStore.Images.Media.BUCKET_DISPLAY_NAME} = ?"
+        contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            projection,
+            selection,
+            arrayOf("CheesUs"),
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                return cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_ID))
+            }
+        }
+        return null
     }
 
     private fun takePhoto() {
