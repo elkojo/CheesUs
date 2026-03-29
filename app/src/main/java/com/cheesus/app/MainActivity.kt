@@ -2,6 +2,7 @@ package com.cheesus.app
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
@@ -173,11 +174,10 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     private fun openGallery() {
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
-        }
-        if (intent.resolveActivity(packageManager) != null) {
-            startActivity(intent)
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, MediaStore.Images.Media.EXTERNAL_CONTENT_URI))
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(this, "No gallery app found", Toast.LENGTH_SHORT).show()
         }
     }
 
